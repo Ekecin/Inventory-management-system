@@ -1,12 +1,13 @@
  "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, AlertTriangle, ArrowDownToLine, Boxes, Check, ChevronDown,
   CirclePlus, ClipboardList, Edit3, LayoutDashboard, LogOut, Package,
   Search, Settings2, ShieldCheck, Trash2, TrendingUp, X
 } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { endPresence, flushEvents, startPresence, tracked } from "@/lib/tracker";
 
 const emptyForm = { name: "", sku: "", category: "General", quantity: "0", unit_price: "", reorder_level: "5", supplier: "" };
 const money = (value) => new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN", maximumFractionDigits: 2 }).format(Number(value || 0));
@@ -28,6 +29,8 @@ export default function InventoryApp() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const viewRef = useRef("Overview");
 
   useEffect(() => {
     if (!supabase) { setAuthLoading(false); return; }
@@ -39,14 +42,31 @@ export default function InventoryApp() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  useEffect(() => { viewRef.current = activeTab; }, [activeTab]);
+
+  // Heartbeat so the admin dashboard can see who is online.
+  useEffect(() => {
+    if (!session?.user) return;
+    return startPresence(() => viewRef.current);
+  }, [session?.user?.id]);
+
+  // Show the Admin link only to users listed in the admins table.
+  useEffect(() => {
+    if (!supabase || !session?.user) { setIsAdmin(false); return; }
+    let cancelled = false;
+    supabase.from("admins").select("user_id").eq("user_id", session.user.id).maybeSingle()
+      .then(({ data }) => { if (!cancelled) setIsAdmin(Boolean(data)); });
+    return () => { cancelled = true; };
+  }, [session?.user?.id]);
+
   const loadItems = useCallback(async () => {
     if (!supabase || !session?.user) return;
     setLoading(true);
     setError("");
-    const { data, error: loadError } = await supabase
+    const { data, error: loadError } = await tracked("inventory.select", "GET", () => supabase
       .from("inventory_items")
       .select("*")
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false }));
     if (loadError) setError(loadError.message);
     else setItems(data || []);
     setLoading(false);
@@ -80,9 +100,9 @@ export default function InventoryApp() {
     event.preventDefault(); setError(""); setNotice("");
     if (!supabase) return;
     setLoading(true);
-    const result = authMode === "login"
-      ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({ email, password });
+    const result = await tracked(authMode === "login" ? "auth.login" : "auth.signup", "AUTH", () => authMode === "login"
+      ? supabase.auth.signInWithPassword({ email, password })
+      : supabase.auth.signUp({ email, password }), { email });
     if (result.error) setError(result.error.message);
     else if (authMode === "signup" && !result.data.session) setNotice("Account created. Check your email to confirm your address, then sign in.");
     setLoading(false);
@@ -96,9 +116,9 @@ export default function InventoryApp() {
       quantity: Number(form.quantity), unit_price: Number(form.unit_price), reorder_level: Number(form.reorder_level),
       supplier: form.supplier.trim(), user_id: session.user.id
     };
-    const result = editing
-      ? await supabase.from("inventory_items").update(payload).eq("id", editing.id).select().single()
-      : await supabase.from("inventory_items").insert(payload).select().single();
+    const result = await tracked(editing ? "inventory.update" : "inventory.insert", editing ? "PATCH" : "POST", () => editing
+      ? supabase.from("inventory_items").update(payload).eq("id", editing.id).select().single()
+      : supabase.from("inventory_items").insert(payload).select().single());
     if (result.error) setError(result.error.message);
     else { setModalOpen(false); setNotice(editing ? "Item updated successfully." : "Item added to inventory."); await loadItems(); }
     setSaving(false);
@@ -106,12 +126,17 @@ export default function InventoryApp() {
 
   async function deleteItem(item) {
     if (!supabase || !window.confirm(`Delete "${item.name}" from inventory? This cannot be undone.`)) return;
-    const { error: deleteError } = await supabase.from("inventory_items").delete().eq("id", item.id);
+    const { error: deleteError } = await tracked("inventory.delete", "DELETE", () => supabase.from("inventory_items").delete().eq("id", item.id));
     if (deleteError) setError(deleteError.message);
     else { setNotice("Item deleted."); await loadItems(); }
   }
 
-  async function signOut() { await supabase?.auth.signOut(); setItems([]); }
+  async function signOut() {
+    await flushEvents();
+    await endPresence();
+    await supabase?.auth.signOut();
+    setItems([]);
+  }
 
   if (!isSupabaseConfigured) return <SetupScreen />;
   if (authLoading) return <div className="center-screen"><div className="loader" /><p>Preparing your workspace…</p></div>;
@@ -150,6 +175,7 @@ export default function InventoryApp() {
           <button className={activeTab === "Overview" ? "nav-item active" : "nav-item"} onClick={() => setActiveTab("Overview")}><LayoutDashboard size={18} /> Overview</button>
           <button className={activeTab === "Inventory" ? "nav-item active" : "nav-item"} onClick={() => setActiveTab("Inventory")}><Package size={18} /> Inventory <span className="nav-count">{items.length}</span></button>
           <button className={activeTab === "Low stock" ? "nav-item active" : "nav-item"} onClick={() => setActiveTab("Low stock")}><AlertTriangle size={18} /> Low stock {lowStock > 0 && <span className="nav-count warning-count">{lowStock}</span>}</button>
+          {isAdmin && <a className="nav-item" href="/admin"><ShieldCheck size={18} /> Admin dashboard</a>}
         </nav>
         <div className="sidebar-bottom"><div className="profile"><div className="avatar">{session.user.email?.[0]?.toUpperCase() || "G"}</div><div className="profile-text"><strong>{session.user.email?.split("@")[0]}</strong><span>{session.user.email}</span></div><button className="icon-button" title="Sign out" onClick={signOut}><LogOut size={17} /></button></div><div className="secure-note"><ShieldCheck size={15} /> Secure inventory workspace</div></div>
       </aside>
