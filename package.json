@@ -2,13 +2,16 @@
   "name": "gratitude-inventory",
   "version": "1.0.0",
   "private": true,
-  "scripts": {
-    "test:e2e": "playwright test",
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
-  },
+ "scripts": {
+  "test": "npm run test:e2e",
+  "test:e2e": "playwright test",
+  "dev": "next dev",
+  "build": "next build",
+  "start": "next start",
+  "lint": "next lint"
+},
+
+  
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
     "lucide-react": "^0.468.0",
