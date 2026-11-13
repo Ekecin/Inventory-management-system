@@ -23,8 +23,9 @@ Install Node.js 18.17 or newer and have a Supabase project.
 1. Open your Supabase project.
 2. Go to **SQL Editor**.
 3. Open `supabase/schema.sql` from this project, copy its contents into the SQL Editor, and run it. This creates the table and security policies.
-4. In Supabase, open **Project Settings → API** (or **Connect**, depending on the dashboard version).
-5. Copy the Project URL and the publishable key (or legacy anon key). Never use the `service_role` secret in this frontend app.
+4. Then run `supabase/sales.sql` the same way. This adds the sales table and the `record_sale` function used by the Sell button, discounts and the Sales tab.
+5. In Supabase, open **Project Settings → API** (or **Connect**, depending on the dashboard version).
+6. Copy the Project URL and the publishable key (or legacy anon key). Never use the `service_role` secret in this frontend app.
 
 ## 3. Add environment variables
 
@@ -75,5 +76,6 @@ public/
   gratitude-logo.jpeg
 supabase/
   schema.sql
+  sales.sql
 .env.example
 ```
